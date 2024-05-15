@@ -16,16 +16,17 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-class Registry {
-    constructor() {
-        this._registry = {};
-    }
+"use strict"
+const express = require('express');
+const router = new express.Router();
 
-    put(name, value) {
-        this._registry[name] = value;
-    }
+// -----------------------------------------------------------------------// 
+// GET /healthcheck
+// -----------------------------------------------------------------------//
+router.get('/healthcheck', async (req, res) => {
+    const svc_serverHealth = req.services.get('server-health');
 
-    get(name) {
-        return this._registry[name];
-    }
-}
+    const status = await svc_serverHealth.get_status();
+    res.json(status);
+})
+module.exports = router

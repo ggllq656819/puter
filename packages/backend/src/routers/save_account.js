@@ -19,7 +19,7 @@
 "use strict"
 const express = require('express');
 const router = new express.Router();
-const {get_taskbar_items, username_exists, send_email_verification_code, send_email_verification_token, invalidate_cached_user} = require('../helpers');
+const {get_taskbar_items, username_exists, send_email_verification_code, send_email_verification_token, invalidate_cached_user, get_user } = require('../helpers');
 const auth = require('../middleware/auth.js');
 const config = require('../config');
 const { Context } = require('../util/context');
@@ -70,6 +70,11 @@ router.post('/save_account', auth, express.json(), async (req, res, next)=>{
     else if(req.body.password.length < config.min_pass_length)
         return res.status(400).send(`Password must be at least ${config.min_pass_length} characters long.`)
 
+    const svc_edgeRateLimit = req.services.get('edge-rate-limit');
+    if ( ! svc_edgeRateLimit.check('save-account') ) {
+        return res.status(429).send('Too many requests.');
+    }
+
     // duplicate username check, do this only if user has supplied a new username
     if(req.body.username !== req.user.username && await username_exists(req.body.username))
         return res.status(400).send('This username already exists in our database. Please use another one.');
@@ -80,11 +85,6 @@ router.post('/save_account', auth, express.json(), async (req, res, next)=>{
     // get pseudo user, if exists
     let pseudo_user = await db.read(`SELECT * FROM user WHERE email = ? AND password IS NULL`, [req.body.email]);
     pseudo_user = pseudo_user[0];
-    // get uuid user, if exists
-    if(req.body.uuid){
-        uuid_user = await db.read(`SELECT * FROM user WHERE uuid = ? LIMIT 1`, [req.body.uuid]);
-        uuid_user = uuid_user[0];
-    }
 
     // send_confirmation_code
     req.body.send_confirmation_code = req.body.send_confirmation_code ?? true;
@@ -158,7 +158,8 @@ router.post('/save_account', auth, express.json(), async (req, res, next)=>{
     }
 
     // create token for login
-    const token = await jwt.sign({uuid: user_uuid}, config.jwt_secret);
+    const svc_auth = req.services.get('auth');
+    const { token } = await svc_auth.create_session_token(req.user, { req });
 
     // user id
     // todo if pseudo user, assign directly no need to do another DB lookup

@@ -176,7 +176,7 @@ router.all('*', async function(req, res, next) {
                 const user = await get_user({uuid: req.query.user_uuid})
 
                 // more validation
-                if(user === undefined || user === null || user === false)
+                if(!user)
                     h += '<p style="text-align:center; color:red;">User not found.</p>';
                 else if(user.unsubscribed === 1)
                     h += '<p style="text-align:center; color:green;">You are already unsubscribed.</p>';
@@ -402,7 +402,7 @@ router.all('*', async function(req, res, next) {
             });
         } catch (e) {
             console.error('error from sendFile', e);
-            return res.status(err.statusCode).send('Error /apps/')
+            return res.status(e.statusCode).send('Error /apps/')
         }
     }
     // --------------------------------------

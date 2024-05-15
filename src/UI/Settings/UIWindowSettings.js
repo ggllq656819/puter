@@ -18,19 +18,13 @@
  */
 
 import UIWindow from '../UIWindow.js'
-import UIWindowChangePassword from '../UIWindowChangePassword.js'
-import UIWindowChangeEmail from './UIWindowChangeEmail.js'
-import UIWindowChangeUsername from '../UIWindowChangeUsername.js'
-import changeLanguage from "../../i18n/i18nChangeLanguage.js"
-import UIWindowConfirmUserDeletion from './UIWindowConfirmUserDeletion.js';
 import AboutTab from './UITabAbout.js';
 import UsageTab from './UITabUsage.js';
 import AccountTab from './UITabAccount.js';
+import SecurityTab from './UITabSecurity.js';
 import PersonalizationTab from './UITabPersonalization.js';
 import LanguageTab from './UITabLanguage.js';
 import ClockTab from './UITabClock.js';
-import UIWindowThemeDialog from '../UIWindowThemeDialog.js';
-import UIWindowManageSessions from '../UIWindowManageSessions.js';
 
 async function UIWindowSettings(options){
     return new Promise(async (resolve) => {
@@ -40,6 +34,7 @@ async function UIWindowSettings(options){
             AboutTab,
             UsageTab,
             AccountTab,
+            SecurityTab,
             PersonalizationTab,
             LanguageTab,
             ClockTab,
@@ -50,9 +45,9 @@ async function UIWindowSettings(options){
         h += `<div class="settings-container">`;
         h += `<div class="settings">`;
             // side bar
-            h += `<div class="settings-sidebar disable-user-select">`;
+            h += `<div class="settings-sidebar disable-user-select disable-context-menu">`;
             tabs.forEach((tab, i) => {
-                h += `<div class="settings-sidebar-item disable-user-select ${i === 0 ? 'active' : ''}" data-settings="${tab.id}" style="background-image: url(${icons[tab.icon]});">${i18n(tab.title_i18n_key)}</div>`;
+                h += `<div class="settings-sidebar-item disable-context-menu disable-user-select ${i === 0 ? 'active' : ''}" data-settings="${tab.id}" style="background-image: url(${window.icons[tab.icon]});">${i18n(tab.title_i18n_key)}</div>`;
             });
             h += `</div>`;
 
@@ -89,7 +84,6 @@ async function UIWindowSettings(options){
             allow_user_select: true,
             backdrop: false,
             width: 800,
-            height: 500,
             height: 'auto',
             dominant: true,
             show_in_taskbar: false,

@@ -184,7 +184,7 @@ async function id2uuid(id){
 
     const cached = options.cached ?? true;
 
-    if ( cached ) {
+    if ( cached && ! options.force ) {
         if (options.username) user = kv.get('users:username:' + options.username);
         else if (options.email) user = kv.get('users:email:' + options.email);
         else if (options.uuid) user = kv.get('users:uuid:' + options.uuid);
@@ -194,16 +194,18 @@ async function id2uuid(id){
         if ( user ) return user;
     }
 
-    if(options.username)
-        user = await db.read("SELECT * FROM `user` WHERE `username` = ? LIMIT 1", [options.username]);
-    else if(options.email)
-        user = await db.read("SELECT * FROM `user` WHERE `email` = ? LIMIT 1", [options.email]);
-    else if(options.uuid)
-        user = await db.read("SELECT * FROM `user` WHERE `uuid` = ? LIMIT 1", [options.uuid]);
-    else if(options.id)
-        user = await db.read("SELECT * FROM `user` WHERE `id` = ? LIMIT 1", [options.id]);
-    else if(options.referral_code)
-        user = await db.read("SELECT * FROM `user` WHERE `referral_code` = ? LIMIT 1", [options.referral_code]);
+    if ( ! options.force ) {
+        if(options.username)
+            user = await db.read("SELECT * FROM `user` WHERE `username` = ? LIMIT 1", [options.username]);
+        else if(options.email)
+            user = await db.read("SELECT * FROM `user` WHERE `email` = ? LIMIT 1", [options.email]);
+        else if(options.uuid)
+            user = await db.read("SELECT * FROM `user` WHERE `uuid` = ? LIMIT 1", [options.uuid]);
+        else if(options.id)
+            user = await db.read("SELECT * FROM `user` WHERE `id` = ? LIMIT 1", [options.id]);
+        else if(options.referral_code)
+            user = await db.read("SELECT * FROM `user` WHERE `referral_code` = ? LIMIT 1", [options.referral_code]);
+    }
 
     if(!user || !user[0]){
         if(options.username)
@@ -679,7 +681,7 @@ const get_descendants_0 = async (path, user, depth, return_thumbnail = false) =>
             [user.id]
         );
         // users that have shared files/dirs with this user
-        sharing_users = await db.read(
+        const sharing_users = await db.read(
             `SELECT DISTINCT(owner_user_id), user.username
                 FROM share
                 INNER JOIN user ON user.id = share.owner_user_id
@@ -717,7 +719,7 @@ const get_descendants_0 = async (path, user, depth, return_thumbnail = false) =>
             return [];
 
         // shared files/dirs with this user
-        shared_fsentries = await db.read(
+        const shared_fsentries = await db.read(
             `SELECT
                 fsentries.id, fsentries.user_id, fsentries.uuid, fsentries.parent_uid, fsentries.bucket, fsentries.bucket_region,
                 fsentries.name, fsentries.shortcut_to, fsentries.is_shortcut, fsentries.metadata, fsentries.is_dir, fsentries.modified,
@@ -897,7 +899,7 @@ const get_descendants = async (...args) => {
         if ( ! result || ! result[0] ) {
             errors.report('id2path.select', {
                 alarm: true,
-                message: `no result for ${entry_uid}: ${e.message}`,
+                message: `no result for ${entry_uid}`,
                 extra: {
                     entry_uid,
                 }
@@ -951,12 +953,12 @@ function cp(source_path, dest_path, user, overwrite, change_name, check_perms = 
     throw new Error(`legacy copy function called`);
 }
 
-isString =  function (variable) {
+function isString(variable) {
     return typeof variable === 'string' || variable instanceof String;
 }
 
 // checks to see if given variable is an object
-isObject = function (variable) {
+function isObject(variable) {
     return variable !== null && typeof variable === 'object';
 }
 
@@ -1545,56 +1547,16 @@ async function generate_system_fsentries(user){
 }
 
 function send_email_verification_code(email_confirm_code, email){
-    const nodemailer = require("nodemailer");
-
-    // send email notif
-    let transporter = nodemailer.createTransport({
-        host: config.smtp_server,
-        port: config.smpt_port,
-        secure: true, // STARTTLS
-        auth: {
-            user: config.smtp_username,
-            pass: config.smtp_password,
-        },
-    });
-
-    transporter.sendMail({
-        from: '"Puter" no-reply@puter.com', // sender address
-        to: email, // list of receivers
-        subject: `${hyphenize_confirm_code(email_confirm_code)} is your confirmation code`, // Subject line
-        html: `<p>Hi there,</p>
-            <p><strong>${hyphenize_confirm_code(email_confirm_code)}</strong> is your email confirmation code.</p>
-            <p>Sincerely,</p>
-            <p>Puter</p>
-        `,
-    });
+    const svc_email = Context.get('services').get('email');
+    svc_email.send_email({ email }, 'email_verification_code', {
+        code: hyphenize_confirm_code(email_confirm_code),
+    })
 }
 
 function send_email_verification_token(email_confirm_token, email, user_uuid){
-    const nodemailer = require("nodemailer");
-
-    // send email notif
-    let transporter = nodemailer.createTransport({
-        host: config.smtp_server,
-        port: config.smpt_port,
-        secure: true, // STARTTLS
-        auth: {
-            user: config.smtp_username,
-            pass: config.smtp_password,
-        },
-    });
-
-    let link = `${config.origin}/confirm-email-by-token?user_uuid=${user_uuid}&token=${email_confirm_token}`;
-    transporter.sendMail({
-        from: '"Puter" no-reply@puter.com', // sender address
-        to: email, // list of receivers
-        subject: `Please confirm your email`, // Subject line
-        html: `<p>Hi there,</p>
-            <p>Please confirm your email address using this link: <strong><a href="${link}">${link}</a></strong>.</p>
-            <p>Sincerely,</p>
-            <p>Puter</p>
-        `,
-    });
+    const svc_email = Context.get('services').get('email');
+    const link = `${config.origin}/confirm-email-by-token?user_uuid=${user_uuid}&token=${email_confirm_token}`;
+    svc_email.send_email({ email }, 'email_verification_link', { link });
 }
 
 async function generate_random_username(){
@@ -1847,7 +1809,7 @@ async function get_taskbar_items(user) {
         try {
             taskbar_items_from_db = JSON.parse(user.taskbar_items);
         }catch(e){
-
+            // ignore errors
         }
     }
 
