@@ -8,7 +8,7 @@
 # worry about Docker unless the build/run process changes.
 
 # Build stage
-FROM node:21-alpine AS build
+FROM node:23.9-alpine AS build
 
 # Install build dependencies
 RUN apk add --no-cache git python3 make g++ \
@@ -23,15 +23,25 @@ COPY package*.json ./
 # Copy the source files
 COPY . .
 
+# Install mocha
+RUN npm install -g mocha
+
 # Install node modules
-RUN npm cache clean --force \
-    && npm ci
+RUN npm cache clean --force && \
+    for i in 1 2 3; do \
+        npm ci && break || \
+        if [ $i -lt 3 ]; then \
+            sleep 15; \
+        else \
+            exit 1; \
+        fi; \
+    done
 
 # Run the build command if necessary
-RUN npm run build
+RUN cd src/gui && npm run build && cd -
 
 # Production stage
-FROM node:21-alpine
+FROM node:23.9-alpine
 
 # Set labels
 LABEL repo="https://github.com/HeyPuter/puter"
@@ -46,7 +56,7 @@ RUN mkdir -p /opt/puter/app
 WORKDIR /opt/puter/app
 
 # Copy built artifacts and necessary files from the build stage
-COPY --from=build /app/dist ./dist
+COPY --from=build /app/src/gui/dist ./dist
 COPY --from=build /app/node_modules ./node_modules
 COPY . .
 
@@ -60,5 +70,9 @@ HEALTHCHECK --interval=30s --timeout=3s \
     CMD wget --no-verbose --tries=1 --spider http://puter.localhost:4100/test || exit 1
 
 ENV NO_VAR_RUNTUME=1
+
+# Attempt to fix `lru-cache@11.0.2` missing after build stage
+# by doing a redundant `npm install` at this stage
+RUN npm install
 
 CMD ["npm", "start"]
