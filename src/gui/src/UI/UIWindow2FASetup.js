@@ -1,0 +1,301 @@
+/*
+ * Copyright (C) 2024-present Puter Technologies Inc.
+ *
+ * This file is part of Puter.
+ *
+ * Puter is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published
+ * by the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+/*
+    Plan:
+        Components: OneAtATimeView < ... >
+
+        Screen 1: QR code and entry box for testing
+            Components: Flexer < UIQRCode, CodeEntryView, ActionsView >
+            Logic:
+            - when CodeEntryView has a value, check it against the QR code value...
+              ... then go to the next screen
+              - CodeEntryView will have callbacks: `verify`, `on_verified`
+            - cancel action
+
+        Screen 2: Recovery codes
+            Components: Flexer < ActionsView >
+            Logic:
+            - done action
+            - cancel action
+            - when done action is clicked, call /auth/configure-2fa/enable
+
+*/
+
+import TeePromise from '../util/TeePromise.js';
+import ValueHolder from '../util/ValueHolder.js';
+import Button from './Components/Button.js';
+import CodeEntryView from './Components/CodeEntryView.js';
+import Flexer from './Components/Flexer.js';
+import UIQRCode from './UIQRCode.js';
+import StepView from './Components/StepView.js';
+import JustHTML from './Components/JustHTML.js';
+import UIComponentWindow from './UIComponentWindow.js';
+
+const UIWindow2FASetup = async function UIWindow2FASetup () {
+    // FIRST REQUEST :: Generate the QR code and recovery codes
+    const resp = await fetch(`${window.api_origin}/auth/configure-2fa/setup`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${puter.authToken}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+    });
+    const data = await resp.json();
+
+    // SECOND REQUEST :: Verify the code [first wizard screen]
+    const check_code_ = async function check_code_ (value) {
+        const resp = await fetch(`${window.api_origin}/auth/configure-2fa/test`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${puter.authToken}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                code: value,
+            }),
+        });
+
+        const data = await resp.json();
+
+        return data.ok;
+    };
+
+    // FINAL REQUEST :: Enable 2FA [second wizard screen]
+    const enable_2fa_ = async function check_code_ (value) {
+        const resp = await fetch(`${window.api_origin}/auth/configure-2fa/enable`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${puter.authToken}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({}),
+        });
+
+        const data = await resp.json();
+
+        return data.ok;
+    };
+
+    let stepper;
+    let code_entry;
+    let win;
+    let done_enabled = new ValueHolder(false);
+
+    const promise = new TeePromise();
+
+    const component =
+        new StepView({
+            _ref: me => stepper = me,
+            children: [
+                new Flexer({
+                    children: [
+                        new JustHTML({
+                            html: `
+                                <div style="display: flex; align-items: center;">
+                                    <div style="display: flex; justify-content: center; align-items: center; width: 25px; height: 25px; border-radius: 50%; background-color: #3e5362; color: #FFFFFF; font-size: 15px; font-weight: 700;">1</div>
+                                    <div style="margin-left: 10px; font-size: 18px; color: hsl(220, 25%, 31%); font-weight: 500;">${html_encode(i18n('setup2fa_1_step_heading'))}</div>
+                                </div>
+                            `,
+                        }),
+                        new JustHTML({
+                            html: `<div style="color: #3b4863">${i18n('setup2fa_1_instructions', [], false)}</div>`,
+                        }),
+                        new JustHTML({
+                            html: `
+                                <div style="display: flex; align-items: center;">
+                                    <div style="display: flex; justify-content: center; align-items: center; width: 25px; height: 25px; border-radius: 50%; background-color: #3e5362; color: #FFFFFF; font-size: 15px; font-weight: 700;">2</div>
+                                    <div style="margin-left: 10px; font-size: 18px; color: hsl(220, 25%, 31%); font-weight: 500;">${html_encode(i18n('setup2fa_2_step_heading'))}</div>
+                                </div>
+                            `,
+                        }),
+                        UIQRCode({
+                            value: data.url,
+                        }),
+                        new JustHTML({
+                            html: `
+                                <div style="display: flex; align-items: center;">
+                                    <div style="display: flex; justify-content: center; align-items: center; width: 25px; height: 25px; border-radius: 50%; background-color: #3e5362; color: #FFFFFF; font-size: 15px; font-weight: 700;">3</div>
+                                    <div style="margin-left: 10px; font-size: 18px; color: hsl(220, 25%, 31%); font-weight: 500;">${html_encode(i18n('setup2fa_3_step_heading'))}</div>
+                                </div>
+                            `,
+                        }),
+                        new CodeEntryView({
+                            _ref: me => code_entry = me,
+                            async 'property.value' (value, { component }) {
+                                if ( ! await check_code_(value) ) {
+                                    component.set('error', 'Invalid code');
+                                    component.set('is_checking_code', false);
+                                    return;
+                                }
+                                component.set('is_checking_code', false);
+
+                                stepper.next();
+                            },
+                        }),
+                    ],
+                    'event.focus' () {
+                        code_entry.focus();
+                    },
+                }),
+                new Flexer({
+                    children: [
+                        new JustHTML({
+                            html: `
+                                <div style="display: flex; align-items: center;">
+                                    <div style="display: flex; justify-content: center; align-items: center; width: 25px; height: 25px; border-radius: 50%; background-color: #3e5362; color: #FFFFFF; font-size: 15px; font-weight: 700;">4</div>
+                                    <div style="margin-left: 10px; font-size: 18px; color: hsl(220, 25%, 31%); font-weight: 500;">${html_encode(i18n('setup2fa_4_step_heading'))}</div>
+                                </div>
+                            `,
+                        }),
+                        new JustHTML({
+                            html: `<div style="color: #3b4863">${i18n('setup2fa_4_instructions', [], false)}</div>`,
+                        }),
+                        new JustHTML({
+                            _ref: me => {
+                                me.dom_.addEventListener('click', (e) => {
+                                    const action = e.target.closest('[data-action]')?.dataset.action;
+                                    if ( action === 'copy' ) {
+                                        navigator.clipboard.writeText(data.codes.join('\n'));
+                                    } else if ( action === 'print' ) {
+                                        const target = me.dom_.querySelector('.recovery-codes-list');
+                                        const print_frame = me.dom_.querySelector('iframe[name="print_frame"]');
+                                        print_frame.contentWindow.document.body.innerHTML = target.outerHTML;
+                                        print_frame.contentWindow.window.focus();
+                                        print_frame.contentWindow.window.print();
+                                    }
+                                });
+                            },
+                            html: `
+                                <iframe name="print_frame" width="0" height="0" frameborder="0" src="about:blank"></iframe>
+                                <div style="display: flex; flex-direction: column; gap: 10px; border: 1px solid #ccc; padding: 20px; margin: 20px auto; width: 90%; max-width: 600px; background-color: #f9f9f9; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);">
+                                    <div class="recovery-codes-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; padding: 0;">
+                                        ${data.codes.map(code => `<div style="background-color: #fff; border: 1px solid #ddd; padding: 10px; text-align: center; font-family: 'Courier New', Courier, monospace; font-size: 12px; letter-spacing: 1px;">${html_encode(code)}</div>`).join('')}
+                                    </div>
+                                    <div style="flex-direction: row-reverse; display: flex; gap: 10px;">
+                                        <button class="button" data-action="copy">${html_encode(i18n('copy'))}</button>
+                                        <button class="button" data-action="print">${html_encode(i18n('print'))}</button>
+                                    </div>
+                                </div>
+                            `,
+                        }),
+                        new JustHTML({
+                            html: `
+                                <div style="display: flex; align-items: center;">
+                                    <div style="display: flex; justify-content: center; align-items: center; width: 25px; height: 25px; border-radius: 50%; background-color: #3e5362; color: #FFFFFF; font-size: 15px; font-weight: 700;">5</div>
+                                    <div style="margin-left: 10px; font-size: 18px; color: hsl(220, 25%, 31%); font-weight: 500;">${html_encode(i18n('setup2fa_5_step_heading'))}</div>
+                                </div>
+                            `,
+                        }),
+                        new JustHTML({
+                            _ref: me => {
+                                me.dom_.addEventListener('change', (e) => {
+                                    if ( ! e.target.matches('input[type="checkbox"]') ) return;
+                                    const inputs = me.dom_.querySelectorAll('input[type="checkbox"]');
+                                    const all_checked = Array.from(inputs).every(i => i.checked);
+                                    done_enabled.set(all_checked);
+                                    const looks_good = me.dom_.querySelector('.looks-good');
+                                    if ( looks_good ) {
+                                        looks_good.style.display = all_checked ? 'block' : 'none';
+                                    }
+                                });
+                            },
+                            html: `
+                                <div style="display: flex; flex-direction: column;">
+                                    <div>
+                                        <input type="checkbox" id="confirmation-0" name="confirmation-0">
+                                        <label for="confirmation-0">${html_encode(i18n('setup2fa_5_confirmation_1'))}</label>
+                                    </div>
+                                    <div>
+                                        <input type="checkbox" id="confirmation-1" name="confirmation-1">
+                                        <label for="confirmation-1">${html_encode(i18n('setup2fa_5_confirmation_2'))}</label>
+                                    </div>
+                                    <span class="looks-good" style="display: none; margin-top: 20px; color: hsl(220, 25%, 31%); font-size: 20px; font-weight: 700;">${html_encode(i18n('looks_good'))}</span>
+                                </div>
+                            `,
+                        }),
+                        new Button({
+                            enabled: done_enabled,
+                            label: i18n('setup2fa_5_button'),
+                            on_click: async () => {
+                                await enable_2fa_();
+                                stepper.next();
+                            },
+                        }),
+                    ],
+                }),
+            ],
+        })
+        ;
+
+    stepper.values_['done'].sub(value => {
+        if ( ! value ) return;
+        $(win).close();
+        // Write "2FA enabled" in green in the console
+        console.log('%c2FA enabled', 'color: green');
+        promise.resolve(true);
+    });
+
+    win = await UIComponentWindow({
+        component,
+        on_before_exit: async () => {
+            if ( ! stepper.get('done') ) {
+                promise.resolve(false);
+            }
+            return true;
+        },
+
+        title: '2FA Setup',
+        app: 'instant-login',
+        single_instance: true,
+        icon: null,
+        uid: null,
+        is_dir: false,
+        // has_head: false,
+        selectable_body: true,
+        // selectable_body: false,
+        allow_context_menu: false,
+        is_resizable: false,
+        is_droppable: false,
+        init_center: true,
+        allow_native_ctxmenu: false,
+        allow_user_select: true,
+        // backdrop: true,
+        width: 550,
+        height: 'auto',
+        dominant: true,
+        show_in_taskbar: false,
+        draggable_body: false,
+        center: true,
+        onAppend: function (this_window) {
+        },
+        window_class: 'window-qr',
+        body_css: {
+            width: 'initial',
+            height: '100%',
+            'background-color': 'rgb(245 247 249)',
+            'backdrop-filter': 'blur(3px)',
+            padding: '20px',
+        },
+    });
+
+    return { promise };
+};
+
+export default UIWindow2FASetup;
