@@ -206,6 +206,51 @@ export class FSService extends PuterService {
             },
         });
 
+        // -- app-owns-appdata -----------------------------------------
+        // Mirror of the ACLService short-circuit at ACLService.check:
+        // an app-under-user actor implicitly holds fs:<uuid>:* on any
+        // entry inside its own /<username>/AppData/<appUid> subtree.
+        // ACL paths (fs.read etc.) already accept these via that
+        // short-circuit, but permissionService.checkMany — used by
+        // createAccessToken's issuer-subset gate — bypasses ACL, so
+        // without this implicator an app can fs.read its appdata but
+        // can't mint a token for the same fs:<uuid>:read it just read.
+        permissions.registerImplicator({
+            id: 'app-owns-appdata',
+            shortcut: true,
+            matches: (permission: string): boolean => {
+                return (
+                    permission.startsWith('fs:') ||
+                    permission.startsWith(`${MANAGE_PERM_PREFIX}:fs:`) ||
+                    permission.startsWith(
+                        `${MANAGE_PERM_PREFIX}:${MANAGE_PERM_PREFIX}:fs:`,
+                    )
+                );
+            },
+            check: async ({ actor, permission }): Promise<unknown> => {
+                if (!actor.app || actor.accessToken) return undefined;
+                const username = actor.user?.username;
+                const appUid = actor.app.uid;
+                if (!username || !appUid) return undefined;
+
+                const stripped = permission.replaceAll(
+                    `${MANAGE_PERM_PREFIX}:`,
+                    '',
+                );
+                const uid = PermissionUtil.split(stripped)[1];
+                if (!uid) return undefined;
+
+                const entry = await fsEntryStore.getEntryByUuid(uid);
+                if (!entry) return undefined;
+
+                const root = `/${username}/AppData/${appUid}`;
+                if (entry.path === root || entry.path.startsWith(`${root}/`)) {
+                    return {};
+                }
+                return undefined;
+            },
+        });
+
         // -- fs-access-levels exploder ----------------------------------
         // `fs:UUID:see` implies `[list, read, write, manage:fs:UUID]`.
         // ACLService.check already expands the same-family chain
@@ -3080,11 +3125,12 @@ export class FSService extends PuterService {
      */
     async removeAllForUser(userId: number): Promise<void> {
         const pageSize = 5000;
+        const falseLiteral = this.clients.db.booleanLiteral(false);
         // Files-first loop: delete backing S3 objects in batches, then DB rows.
         for (;;) {
             const files = (await this.clients.db.read(
                 `SELECT uuid, bucket, bucket_region FROM fsentries
-                 WHERE user_id = ? AND is_dir = 0 AND (is_shortcut = 0 OR is_shortcut IS NULL) AND (is_symlink = 0 OR is_symlink IS NULL)
+                 WHERE user_id = ? AND is_dir = ${falseLiteral} AND (is_shortcut = ${falseLiteral} OR is_shortcut IS NULL) AND (is_symlink = ${falseLiteral} OR is_symlink IS NULL)
                  LIMIT ${pageSize}`,
                 [userId],
             )) as Array<{
